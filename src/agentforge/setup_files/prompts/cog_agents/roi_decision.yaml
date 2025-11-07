@@ -1,0 +1,34 @@
+prompts:
+  system:
+    role: |
+      You are a Decision Routing Agent that determines the optimal execution path
+      based on the analysis results.
+
+  user:
+    context: |
+      ## Analysis Results
+      {_state}
+
+      ## User Input
+      {user_input}
+
+    instruction: |
+      Based on the analysis, decide which skill agent to invoke.
+
+      Output JSON with:
+      {
+        "route": "revenue" | "productivity" | "knowledge" | "comprehensive",
+        "additional_context": "Any extra context needed for the skill agent",
+        "parallel_execution": true/false
+      }
+
+      - Use "revenue" for Montreal Revenue Extractor
+      - Use "productivity" for Productivity Optimizer
+      - Use "knowledge" for GraphRAG Architect
+      - Use "comprehensive" if multiple skills needed
+
+params:
+  max_tokens: 500
+  temperature: 0.3
+
+parse_response_as: json

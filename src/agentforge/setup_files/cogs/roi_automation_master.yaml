@@ -1,0 +1,149 @@
+cog:
+  name: "ROI Automation Master"
+  description: |
+    Master orchestration cog for AI automation ROI prioritization system.
+    Coordinates three specialist agents:
+    - Montreal Revenue Extractor: Client acquisition and monetization
+    - Productivity Optimizer: Neuroscience-based performance enhancement
+    - GraphRAG Architect: Knowledge management system design
+
+  chat_memory_enabled: true
+  chat_history_max_results: 10
+  chat_history_max_retrieval: 5
+
+  agents:
+    # Analysis phase
+    - id: analyzer
+      template_file: cog_agents/roi_analyzer
+      model_overrides:
+        api: gemini_api
+        model: gemini_flash
+
+    # Decision routing
+    - id: decision
+      template_file: cog_agents/roi_decision
+      model_overrides:
+        api: gemini_api
+        model: gemini_flash
+
+    # Specialist agents
+    - id: revenue_agent
+      template_file: montreal_revenue_extractor
+      model_overrides:
+        api: anthropic_api
+        model: claude4sonnet
+
+    - id: productivity_agent
+      template_file: productivity_optimizer
+      model_overrides:
+        api: anthropic_api
+        model: claude4sonnet
+
+    - id: knowledge_agent
+      template_file: graphrag_architect
+      model_overrides:
+        api: anthropic_api
+        model: claude4sonnet
+
+    # Response synthesis
+    - id: synthesizer
+      template_file: cog_agents/roi_response
+      model_overrides:
+        api: anthropic_api
+        model: claude4sonnet
+
+  memory:
+    # Chat history for context
+    - id: chat_history
+      type: agentforge.storage.chat_history_memory.ChatHistoryMemory
+      query_before: [analyzer, synthesizer]
+      update_after: [synthesizer]
+      query_keys: [user_input]
+      update_keys: [user_input, response]
+
+    # Working memory for agent state
+    - id: scratchpad
+      type: agentforge.storage.scratchpad.Scratchpad
+      query_before: [decision, synthesizer]
+      update_after: [analyzer, decision, revenue_agent, productivity_agent, knowledge_agent]
+      update_keys: [analyzer, decision, revenue_agent, productivity_agent, knowledge_agent]
+
+    # Long-term memory for user context
+    - id: user_context
+      type: agentforge.storage.memory.Memory
+      collection_id: roi_user_context
+      query_before: [analyzer]
+      update_after: [synthesizer]
+      query_keys: [user_input]
+      update_keys: [user_input, analysis, recommendations]
+
+  flow:
+    start: analyzer
+
+    transitions:
+      # Analysis phase determines routing
+      analyzer: decision
+
+      # Decision routing to specialist agents
+      decision:
+        route:
+          "revenue": revenue_agent
+          "productivity": productivity_agent
+          "knowledge": knowledge_agent
+          "comprehensive": revenue_agent  # Start comprehensive flow
+        fallback: synthesizer
+        max_visits: 1
+
+      # Specialist agents proceed to synthesis
+      revenue_agent: synthesizer
+      productivity_agent: synthesizer
+      knowledge_agent: synthesizer
+
+      # Final response
+      synthesizer:
+        end: true
+
+  settings:
+    # Enable detailed logging for debugging
+    logging:
+      enabled: true
+      level: info
+
+    # Trail recording for audit
+    trail_logging:
+      enabled: true
+
+    # Error handling
+    error_handling:
+      on_agent_error: "continue"
+      max_retries: 2
+      fallback_response: |
+        I encountered an error processing your request. Please try:
+        1. Rephrasing your question
+        2. Breaking it into smaller parts
+        3. Checking the documentation at docs/ROI_AUTOMATION_SYSTEM.md
+
+  examples:
+    - user_input: "I want to make $4000 every 2 weeks from AI freelancing while working at Labatt"
+      expected_route: "revenue"
+      expected_output: |
+        Montreal market analysis, service packages, 21-day acquisition pipeline,
+        bilingual templates, Quebec tax considerations
+
+    - user_input: "How can I optimize my schedule for deep work with 15-23h work hours?"
+      expected_route: "productivity"
+      expected_output: |
+        Chronobiological analysis, neurotransmitter optimization protocols,
+        deep work architecture, anti-procrastination framework
+
+    - user_input: "Design a knowledge management system for all my documents and emails"
+      expected_route: "knowledge"
+      expected_output: |
+        GraphRAG architecture, Neo4j + Pinecone setup, ingestion pipeline,
+        multi-agent system, cost analysis, 90-day roadmap
+
+    - user_input: "Help me transition to AI freelancing with maximum productivity"
+      expected_route: "comprehensive"
+      expected_output: |
+        Combined approach: Revenue strategy + productivity optimization +
+        knowledge system for client research

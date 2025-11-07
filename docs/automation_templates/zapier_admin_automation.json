@@ -1,0 +1,219 @@
+{
+  "name": "Government Email Auto-Processor",
+  "description": "Automatically processes emails from Quebec government agencies (RAMQ, Revenu Quebec, CRA) and creates calendar reminders and tracking entries",
+  "version": "1.0.0",
+  "author": "AgentForge ROI Automation System",
+  "estimated_monthly_runs": 10,
+  "roi_hours_saved_monthly": 2,
+
+  "trigger": {
+    "app": "Gmail",
+    "event": "New Email Matching Search",
+    "search_string": "from:(ramq.gouv.qc.ca OR revenuquebec.ca OR cra-arc.gc.ca)",
+    "config": {
+      "label": "Admin/Government",
+      "attachment": "any"
+    }
+  },
+
+  "filters": [
+    {
+      "field": "Subject",
+      "condition": "does_not_contain",
+      "value": "Newsletter",
+      "reason": "Exclude promotional content"
+    },
+    {
+      "field": "From",
+      "condition": "matches_regex",
+      "value": "@(ramq\\.gouv\\.qc\\.ca|revenuquebec\\.ca|cra-arc\\.gc\\.ca)$",
+      "reason": "Ensure legitimate government emails only"
+    }
+  ],
+
+  "actions": [
+    {
+      "step": 1,
+      "app": "Google Calendar",
+      "action": "Create Detailed Event",
+      "config": {
+        "calendar": "Personal",
+        "summary": "📋 Process: {{Subject}}",
+        "description": "Source: {{From}}\nReceived: {{Date}}\nSubject: {{Subject}}\n\nEmail Link: {{Link}}\n\nAction Required: Review and respond to government correspondence",
+        "start_date": "{{Date}} + 7 days",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "reminders": [
+          {"method": "email", "minutes_before": 1440},
+          {"method": "popup", "minutes_before": 60}
+        ],
+        "color": "Red"
+      },
+      "error_handling": {
+        "on_error": "continue",
+        "notify": true
+      }
+    },
+
+    {
+      "step": 2,
+      "app": "Google Sheets",
+      "action": "Add Row to Sheet",
+      "config": {
+        "spreadsheet_id": "{{YOUR_SPREADSHEET_ID}}",
+        "worksheet": "Government Mail Tracking",
+        "values": {
+          "A": "{{Date}}",
+          "B": "{{From}}",
+          "C": "{{Subject}}",
+          "D": "={{IF(Has_Attachment, \"Yes\", \"No\")}}",
+          "E": "Pending",
+          "F": "={{Date}} + 7",
+          "G": "={{Link}}",
+          "H": ""
+        }
+      },
+      "column_headers": {
+        "A": "Received Date",
+        "B": "Sender",
+        "C": "Subject",
+        "D": "Has Attachment",
+        "E": "Status",
+        "F": "Action By Date",
+        "G": "Email Link",
+        "H": "Notes"
+      }
+    },
+
+    {
+      "step": 3,
+      "app": "Slack",
+      "action": "Send Channel Message",
+      "config": {
+        "channel": "#admin-notifications",
+        "text": "📨 *New Government Document Received*",
+        "blocks": [
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "*From:* {{From}}\n*Subject:* {{Subject}}\n*Action By:* {{Date + 7 days}}"
+            }
+          },
+          {
+            "type": "actions",
+            "elements": [
+              {
+                "type": "button",
+                "text": "View Email",
+                "url": "{{Link}}"
+              },
+              {
+                "type": "button",
+                "text": "View Calendar",
+                "url": "https://calendar.google.com"
+              }
+            ]
+          }
+        ]
+      },
+      "alternative": {
+        "app": "SMS",
+        "action": "Send SMS",
+        "config": {
+          "to": "{{YOUR_PHONE_NUMBER}}",
+          "body": "📨 Government mail: {{Subject}} - Action required by {{Date + 7 days}}"
+        }
+      }
+    },
+
+    {
+      "step": 4,
+      "app": "Gmail",
+      "action": "Add Label",
+      "config": {
+        "message_id": "{{Message_ID}}",
+        "labels": ["Admin/Processed", "Action Required"]
+      }
+    }
+  ],
+
+  "setup_instructions": [
+    {
+      "step": 1,
+      "title": "Create Google Sheet",
+      "instructions": [
+        "Go to Google Sheets and create a new spreadsheet",
+        "Name it 'Admin Tracking'",
+        "Create a worksheet named 'Government Mail Tracking'",
+        "Add headers in row 1: Received Date | Sender | Subject | Has Attachment | Status | Action By Date | Email Link | Notes",
+        "Copy the spreadsheet ID from the URL"
+      ]
+    },
+    {
+      "step": 2,
+      "title": "Setup Gmail Labels",
+      "instructions": [
+        "In Gmail, create labels: 'Admin/Processed' and 'Action Required'",
+        "These will be automatically applied to processed emails"
+      ]
+    },
+    {
+      "step": 3,
+      "title": "Configure Slack (Optional)",
+      "instructions": [
+        "Create a #admin-notifications channel in Slack",
+        "Or replace with SMS notification if preferred",
+        "Update the channel name in the Zap configuration"
+      ]
+    },
+    {
+      "step": 4,
+      "title": "Import Zap",
+      "instructions": [
+        "Go to Zapier and create a new Zap",
+        "Import this JSON configuration",
+        "Replace {{YOUR_SPREADSHEET_ID}} with your actual spreadsheet ID",
+        "Replace {{YOUR_PHONE_NUMBER}} if using SMS alternative",
+        "Test the Zap with a sample email",
+        "Turn on the Zap"
+      ]
+    }
+  ],
+
+  "testing_checklist": [
+    "Send test email from ramq.gouv.qc.ca (or use Gmail's 'Send as' feature)",
+    "Verify calendar event is created 7 days in future",
+    "Check that Google Sheet row is added correctly",
+    "Confirm Slack/SMS notification is received",
+    "Verify Gmail labels are applied",
+    "Test with attachment and without attachment"
+  ],
+
+  "maintenance": {
+    "frequency": "Monthly",
+    "tasks": [
+      "Review Google Sheet for completed items",
+      "Archive processed emails older than 1 year",
+      "Update email filters if new government domains are added",
+      "Check Zapier task usage (typically 10-20 tasks/month)"
+    ]
+  },
+
+  "cost_estimate": {
+    "zapier_plan": "Free or Starter ($19.99/month)",
+    "monthly_tasks_used": "40-80 tasks",
+    "additional_costs": "$0",
+    "notes": "This automation typically uses 4 tasks per trigger (1 trigger + 3 actions). With ~10 government emails per month, total usage is ~40 tasks."
+  },
+
+  "roi_analysis": {
+    "time_saved_per_email": "10 minutes",
+    "emails_per_month": 10,
+    "total_time_saved": "100 minutes (1.7 hours)",
+    "annual_time_saved": "20 hours",
+    "value_at_150_per_hour": "$3,000/year",
+    "setup_time": "1 hour",
+    "payback_period": "Less than 1 week"
+  }
+}

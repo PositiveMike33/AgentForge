@@ -1,0 +1,532 @@
+{
+  "name": "Crypto Portfolio Auto-Sync",
+  "description": "Automatically syncs crypto holdings from Ndax and Bitget exchanges to Google Sheets with price tracking and alert notifications",
+  "version": "1.0.0",
+  "author": "AgentForge ROI Automation System",
+  "platform": "Make.com (Integromat)",
+  "estimated_monthly_operations": 720,
+  "roi_hours_saved_monthly": 8,
+
+  "schedule": {
+    "type": "interval",
+    "frequency": "Every 1 hour",
+    "timezone": "America/Montreal",
+    "active_hours": "24/7"
+  },
+
+  "scenario_structure": {
+    "modules": [
+      {
+        "id": 1,
+        "type": "trigger",
+        "app": "Make",
+        "module": "Schedule",
+        "config": {
+          "interval": 1,
+          "unit": "hour"
+        },
+        "notes": "Triggers the scenario every hour"
+      },
+
+      {
+        "id": 2,
+        "type": "action",
+        "app": "HTTP",
+        "module": "Make a Request",
+        "config": {
+          "url": "https://api.ndax.io/v1/account/balance",
+          "method": "GET",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{secrets.NDAX_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "parse_response": true
+        },
+        "output_example": {
+          "balances": [
+            {"asset": "BTC", "free": "0.5", "locked": "0"},
+            {"asset": "ETH", "free": "2.3", "locked": "0"},
+            {"asset": "CAD", "free": "1500.00", "locked": "0"}
+          ]
+        },
+        "error_handling": {
+          "on_error": "rollback",
+          "retry": {
+            "attempts": 3,
+            "interval": 60
+          }
+        },
+        "notes": "Fetch current balances from Ndax exchange"
+      },
+
+      {
+        "id": 3,
+        "type": "action",
+        "app": "HTTP",
+        "module": "Make a Request",
+        "config": {
+          "url": "https://api.bitget.com/api/spot/v1/account/assets",
+          "method": "GET",
+          "headers": [
+            {
+              "name": "ACCESS-KEY",
+              "value": "{{secrets.BITGET_API_KEY}}"
+            },
+            {
+              "name": "ACCESS-SIGN",
+              "value": "{{hmacSHA256(timestamp + method + requestPath, secrets.BITGET_SECRET_KEY)}}"
+            },
+            {
+              "name": "ACCESS-TIMESTAMP",
+              "value": "{{timestamp}}"
+            },
+            {
+              "name": "ACCESS-PASSPHRASE",
+              "value": "{{secrets.BITGET_PASSPHRASE}}"
+            }
+          ],
+          "parse_response": true
+        },
+        "output_example": {
+          "data": [
+            {"coin": "BTC", "available": "0.3", "frozen": "0"},
+            {"coin": "ETH", "available": "1.5", "frozen": "0"},
+            {"coin": "USDT", "available": "5000", "frozen": "0"}
+          ]
+        },
+        "error_handling": {
+          "on_error": "rollback",
+          "retry": {
+            "attempts": 3,
+            "interval": 60
+          }
+        },
+        "notes": "Fetch current balances from Bitget exchange"
+      },
+
+      {
+        "id": 4,
+        "type": "action",
+        "app": "HTTP",
+        "module": "Make a Request",
+        "config": {
+          "url": "https://api.coingecko.com/api/v3/simple/price",
+          "method": "GET",
+          "query_string": {
+            "ids": "bitcoin,ethereum",
+            "vs_currencies": "cad"
+          },
+          "parse_response": true
+        },
+        "output_example": {
+          "bitcoin": {"cad": 85000.50},
+          "ethereum": {"cad": 4200.75}
+        },
+        "notes": "Get current CAD prices for crypto assets"
+      },
+
+      {
+        "id": 5,
+        "type": "action",
+        "app": "Tools",
+        "module": "Set Variables",
+        "config": {
+          "variables": [
+            {
+              "name": "ndax_btc",
+              "value": "{{parseNumber(module2.balances[].asset == 'BTC' ? module2.balances[].free : 0)}}"
+            },
+            {
+              "name": "ndax_eth",
+              "value": "{{parseNumber(module2.balances[].asset == 'ETH' ? module2.balances[].free : 0)}}"
+            },
+            {
+              "name": "ndax_cad",
+              "value": "{{parseNumber(module2.balances[].asset == 'CAD' ? module2.balances[].free : 0)}}"
+            },
+            {
+              "name": "bitget_btc",
+              "value": "{{parseNumber(module3.data[].coin == 'BTC' ? module3.data[].available : 0)}}"
+            },
+            {
+              "name": "bitget_eth",
+              "value": "{{parseNumber(module3.data[].coin == 'ETH' ? module3.data[].available : 0)}}"
+            },
+            {
+              "name": "bitget_usdt",
+              "value": "{{parseNumber(module3.data[].coin == 'USDT' ? module3.data[].available : 0)}}"
+            },
+            {
+              "name": "total_btc",
+              "value": "{{ndax_btc + bitget_btc}}"
+            },
+            {
+              "name": "total_eth",
+              "value": "{{ndax_eth + bitget_eth}}"
+            },
+            {
+              "name": "btc_value_cad",
+              "value": "{{total_btc * module4.bitcoin.cad}}"
+            },
+            {
+              "name": "eth_value_cad",
+              "value": "{{total_eth * module4.ethereum.cad}}"
+            },
+            {
+              "name": "total_value_cad",
+              "value": "{{btc_value_cad + eth_value_cad + ndax_cad + bitget_usdt * 1.35}}"
+            }
+          ]
+        },
+        "notes": "Calculate total holdings and CAD values"
+      },
+
+      {
+        "id": 6,
+        "type": "action",
+        "app": "Google Sheets",
+        "module": "Search Rows",
+        "config": {
+          "spreadsheet_id": "{{secrets.CRYPTO_SHEET_ID}}",
+          "worksheet": "Current Holdings",
+          "column": "A",
+          "value": "{{formatDate(now, 'YYYY-MM-DD')}}"
+        },
+        "notes": "Check if today's entry already exists"
+      },
+
+      {
+        "id": 7,
+        "type": "router",
+        "app": "Tools",
+        "module": "Router",
+        "routes": [
+          {
+            "id": "route_1",
+            "filter": {
+              "condition": "{{module6.total_rows == 0}}",
+              "label": "No entry for today - Add new row"
+            },
+            "target_module": 8
+          },
+          {
+            "id": "route_2",
+            "filter": {
+              "condition": "{{module6.total_rows > 0}}",
+              "label": "Entry exists - Update row"
+            },
+            "target_module": 9
+          }
+        ]
+      },
+
+      {
+        "id": 8,
+        "type": "action",
+        "app": "Google Sheets",
+        "module": "Add a Row",
+        "config": {
+          "spreadsheet_id": "{{secrets.CRYPTO_SHEET_ID}}",
+          "worksheet": "Current Holdings",
+          "values": {
+            "Date": "{{formatDate(now, 'YYYY-MM-DD HH:mm')}}",
+            "NDAX_BTC": "{{ndax_btc}}",
+            "NDAX_ETH": "{{ndax_eth}}",
+            "NDAX_CAD": "{{ndax_cad}}",
+            "Bitget_BTC": "{{bitget_btc}}",
+            "Bitget_ETH": "{{bitget_eth}}",
+            "Bitget_USDT": "{{bitget_usdt}}",
+            "Total_BTC": "{{total_btc}}",
+            "Total_ETH": "{{total_eth}}",
+            "BTC_Price_CAD": "={{module4.bitcoin.cad}}",
+            "ETH_Price_CAD": "={{module4.ethereum.cad}}",
+            "Total_Value_CAD": "={{total_value_cad}}",
+            "24h_Change": "={{(Total_Value_CAD - OFFSET(Total_Value_CAD, -24, 0)) / OFFSET(Total_Value_CAD, -24, 0) * 100}}"
+          }
+        },
+        "notes": "Add new hourly data point"
+      },
+
+      {
+        "id": 9,
+        "type": "action",
+        "app": "Google Sheets",
+        "module": "Update a Row",
+        "config": {
+          "spreadsheet_id": "{{secrets.CRYPTO_SHEET_ID}}",
+          "worksheet": "Current Holdings",
+          "row_number": "{{module6.row_number}}",
+          "values": "{{same as module 8}}"
+        },
+        "notes": "Update existing row with latest data"
+      },
+
+      {
+        "id": 10,
+        "type": "action",
+        "app": "Google Sheets",
+        "module": "Search Rows",
+        "config": {
+          "spreadsheet_id": "{{secrets.CRYPTO_SHEET_ID}}",
+          "worksheet": "Current Holdings",
+          "limit": 2,
+          "sort_order": "descending",
+          "sort_column": "A"
+        },
+        "notes": "Get last 2 entries to compare values"
+      },
+
+      {
+        "id": 11,
+        "type": "router",
+        "app": "Tools",
+        "module": "Router",
+        "routes": [
+          {
+            "id": "alert_route_1",
+            "filter": {
+              "condition": "{{total_value_cad < module10.rows[1].Total_Value_CAD * 0.95}}",
+              "label": "Portfolio down 5% - Send alert"
+            },
+            "target_module": 12
+          },
+          {
+            "id": "alert_route_2",
+            "filter": {
+              "condition": "{{total_value_cad > module10.rows[1].Total_Value_CAD * 1.10}}",
+              "label": "Portfolio up 10% - Send notification"
+            },
+            "target_module": 13
+          },
+          {
+            "id": "alert_route_3",
+            "filter": {
+              "condition": "{{true}}",
+              "label": "Normal operation - No alert"
+            },
+            "target_module": null
+          }
+        ]
+      },
+
+      {
+        "id": 12,
+        "type": "action",
+        "app": "Twilio",
+        "module": "Send SMS",
+        "config": {
+          "to": "{{secrets.PHONE_NUMBER}}",
+          "body": "⚠️ CRYPTO ALERT: Portfolio down 5%\nCurrent: ${{formatNumber(total_value_cad, 2)}} CAD\nPrevious: ${{formatNumber(module10.rows[1].Total_Value_CAD, 2)}} CAD\nChange: {{formatNumber((total_value_cad - module10.rows[1].Total_Value_CAD) / module10.rows[1].Total_Value_CAD * 100, 2)}}%"
+        },
+        "alternative": {
+          "app": "Slack",
+          "config": {
+            "channel": "#crypto-alerts",
+            "text": "Same message as SMS"
+          }
+        }
+      },
+
+      {
+        "id": 13,
+        "type": "action",
+        "app": "Slack",
+        "module": "Send Channel Message",
+        "config": {
+          "channel": "#crypto-alerts",
+          "text": "📈 Portfolio Milestone!\nYour portfolio is up 10%!\nCurrent value: ${{formatNumber(total_value_cad, 2)}} CAD 🎉"
+        }
+      }
+    ]
+  },
+
+  "google_sheets_setup": {
+    "spreadsheet_name": "Crypto Portfolio Tracker",
+    "worksheets": [
+      {
+        "name": "Current Holdings",
+        "headers": [
+          "Date",
+          "NDAX_BTC",
+          "NDAX_ETH",
+          "NDAX_CAD",
+          "Bitget_BTC",
+          "Bitget_ETH",
+          "Bitget_USDT",
+          "Total_BTC",
+          "Total_ETH",
+          "BTC_Price_CAD",
+          "ETH_Price_CAD",
+          "Total_Value_CAD",
+          "24h_Change (%)"
+        ],
+        "formulas": {
+          "L2": "=K2*I2+K3*J2+E2+G2*1.35",
+          "M2": "=(L2-OFFSET(L2,-24,0))/OFFSET(L2,-24,0)*100"
+        }
+      },
+      {
+        "name": "Daily Summary",
+        "description": "Aggregated daily stats",
+        "query": "=QUERY('Current Holdings'!A:M, \"SELECT A, MAX(L), MIN(L), AVG(L) WHERE A IS NOT NULL GROUP BY toDate(A) ORDER BY A DESC\")"
+      },
+      {
+        "name": "Charts",
+        "charts": [
+          {
+            "name": "Portfolio Value Over Time",
+            "type": "Line Chart",
+            "data_range": "Current Holdings!A:A,L:L",
+            "x_axis": "Date",
+            "y_axis": "Total Value CAD"
+          },
+          {
+            "name": "Asset Allocation",
+            "type": "Pie Chart",
+            "data": "=Current Holdings!H2*BTC_Price_CAD, Current Holdings!I2*ETH_Price_CAD, Current Holdings!E2"
+          }
+        ]
+      }
+    ]
+  },
+
+  "api_setup_instructions": {
+    "ndax": [
+      "Log in to Ndax.io",
+      "Go to Account Settings > API Management",
+      "Create new API key with 'Read Only' permissions",
+      "Save API Key and Secret securely",
+      "Enable IP whitelist for added security (optional)",
+      "Test API key with: curl -H 'Authorization: Bearer YOUR_KEY' https://api.ndax.io/v1/account/balance"
+    ],
+    "bitget": [
+      "Log in to Bitget.com",
+      "Go to API Management > Create API",
+      "Enable 'Read' permission only",
+      "Set passphrase (required for all API calls)",
+      "Save API Key, Secret Key, and Passphrase",
+      "Note: Bitget uses HMAC-SHA256 signature for authentication",
+      "Test API: https://bitgetlimited.github.io/apidoc/en/spot/#get-account-assets"
+    ],
+    "coingecko": [
+      "No API key required for free tier (50 calls/minute)",
+      "For higher limits, sign up at https://www.coingecko.com/en/api/pricing",
+      "Free tier is sufficient for hourly updates"
+    ]
+  },
+
+  "security_best_practices": [
+    "Store all API keys in Make.com Data Store (encrypted)",
+    "Use 'Read Only' API permissions only",
+    "Enable IP whitelisting on exchanges if available",
+    "Regularly rotate API keys (quarterly)",
+    "Never share API keys or include in screenshots",
+    "Use 2FA on all exchange accounts",
+    "Monitor API usage logs for suspicious activity"
+  ],
+
+  "make_setup_steps": [
+    {
+      "step": 1,
+      "title": "Create Make.com Account",
+      "instructions": [
+        "Sign up at make.com",
+        "Choose Free plan (1000 operations/month) or Core plan ($9/month, 10K operations)",
+        "For hourly updates: 24 ops/day × 30 days = 720 ops/month (fits in free plan)"
+      ]
+    },
+    {
+      "step": 2,
+      "title": "Setup Data Store for Secrets",
+      "instructions": [
+        "Go to Data Stores in Make.com",
+        "Create new data store named 'Secrets'",
+        "Add keys: NDAX_API_KEY, BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE, CRYPTO_SHEET_ID, PHONE_NUMBER",
+        "Values are encrypted at rest"
+      ]
+    },
+    {
+      "step": 3,
+      "title": "Create Google Sheets",
+      "instructions": [
+        "Create spreadsheet from template in google_sheets_setup section",
+        "Share with Make.com (give edit access)",
+        "Copy spreadsheet ID from URL and add to Data Store"
+      ]
+    },
+    {
+      "step": 4,
+      "title": "Import Scenario",
+      "instructions": [
+        "In Make.com, create new scenario",
+        "Use 'Import Blueprint' and paste this JSON",
+        "Connect each module to your accounts (Google, Twilio/Slack)",
+        "Configure Data Store references for secrets",
+        "Test each module individually"
+      ]
+    },
+    {
+      "step": 5,
+      "title": "Test and Activate",
+      "instructions": [
+        "Run scenario manually first",
+        "Verify data appears in Google Sheets",
+        "Test alert conditions by manually adjusting values",
+        "Activate scenario to run on schedule"
+      ]
+    }
+  ],
+
+  "cost_estimate": {
+    "make_plan": "Free (1000 ops/month) or Core ($9/month)",
+    "operations_per_month": 720,
+    "breakdown": {
+      "schedule_trigger": "720 ops",
+      "api_calls": "2160 ops (3 APIs × 720)",
+      "google_sheets": "1440 ops (2 operations × 720)",
+      "alerts": "~20 ops (occasional)",
+      "total": "~4340 ops/month"
+    },
+    "recommended_plan": "Core ($9/month) - 10,000 operations",
+    "additional_costs": "$0 (CoinGecko free tier, Twilio pay-as-you-go ~$0.01/SMS)"
+  },
+
+  "roi_analysis": {
+    "manual_process_time": "10 min/day to check multiple exchanges",
+    "automation_time": "0 minutes",
+    "time_saved_monthly": "5 hours",
+    "decision_improvement": "Real-time alerts prevent missed opportunities",
+    "value_at_150_per_hour": "$750/month",
+    "annual_value": "$9,000",
+    "cost": "$108/year (Make Core plan)",
+    "net_annual_roi": "$8,892",
+    "payback_period": "4 days"
+  },
+
+  "troubleshooting": {
+    "common_issues": [
+      {
+        "issue": "API authentication fails",
+        "solution": "Verify API keys are correct, check if they expired, ensure IP whitelist includes Make.com IPs"
+      },
+      {
+        "issue": "Google Sheets shows #REF! error",
+        "solution": "Check that formula references correct columns, ensure OFFSET function has enough historical data (24 rows)"
+      },
+      {
+        "issue": "Scenario runs out of operations",
+        "solution": "Reduce update frequency to every 2-4 hours, or upgrade to Core plan"
+      },
+      {
+        "issue": "Alerts not triggering",
+        "solution": "Check router conditions, verify comparison logic uses correct variable names, test with manual values"
+      }
+    ]
+  }
+}
